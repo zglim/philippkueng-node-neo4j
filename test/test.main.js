@@ -3011,6 +3011,346 @@ describe('Testing Node specific operations for Neo4j', function () {
         });
     });
 
+    describe('\n=> Test Batch Read Nodes by IDs', function () {
+        var nodeIdOne, nodeIdTwo, nodeIdThree;
+
+        before(function (done) {
+            db.insertNode({ name: 'BatchNode1', age: 10 }, function (err, node1) {
+                onlyResult(err, node1);
+                nodeIdOne = node1._id;
+                db.insertNode({ name: 'BatchNode2', age: 20 }, function (err, node2) {
+                    onlyResult(err, node2);
+                    nodeIdTwo = node2._id;
+                    db.insertNode({ name: 'BatchNode3', age: 30 }, function (err, node3) {
+                        onlyResult(err, node3);
+                        nodeIdThree = node3._id;
+                        done();
+                    });
+                });
+            });
+        });
+
+        describe('-> Read multiple existing nodes by ids', function () {
+            it('should return all nodes in the correct order', function (done) {
+                db.readNodesByIds([nodeIdOne, nodeIdTwo, nodeIdThree], function (err, result) {
+                    onlyResult(err, result);
+                    result.should.be.an.instanceOf(Array);
+                    result.should.have.lengthOf(3);
+                    result[0].should.have.property('_id', nodeIdOne);
+                    result[0].should.have.property('name', 'BatchNode1');
+                    result[0].should.have.property('age', 10);
+                    result[1].should.have.property('_id', nodeIdTwo);
+                    result[1].should.have.property('name', 'BatchNode2');
+                    result[2].should.have.property('_id', nodeIdThree);
+                    result[2].should.have.property('name', 'BatchNode3');
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read nodes with partial miss (some ids do not exist)', function () {
+            it('should return nodes for existing ids and null for missing ids', function (done) {
+                db.readNodesByIds([nodeIdOne, 123456789, nodeIdThree], function (err, result) {
+                    onlyResult(err, result);
+                    result.should.be.an.instanceOf(Array);
+                    result.should.have.lengthOf(3);
+                    result[0].should.have.property('_id', nodeIdOne);
+                    result[0].should.have.property('name', 'BatchNode1');
+                    should.equal(result[1], null);
+                    result[2].should.have.property('_id', nodeIdThree);
+                    result[2].should.have.property('name', 'BatchNode3');
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read nodes with all ids not existing', function () {
+            it('should return an array of nulls', function (done) {
+                db.readNodesByIds([123456780, 123456781, 123456782], function (err, result) {
+                    onlyResult(err, result);
+                    result.should.be.an.instanceOf(Array);
+                    result.should.have.lengthOf(3);
+                    should.equal(result[0], null);
+                    should.equal(result[1], null);
+                    should.equal(result[2], null);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read nodes with duplicate ids', function () {
+            it('should return the same node for each duplicate id', function (done) {
+                db.readNodesByIds([nodeIdOne, nodeIdOne, nodeIdTwo], function (err, result) {
+                    onlyResult(err, result);
+                    result.should.be.an.instanceOf(Array);
+                    result.should.have.lengthOf(3);
+                    result[0].should.have.property('_id', nodeIdOne);
+                    result[1].should.have.property('_id', nodeIdOne);
+                    result[2].should.have.property('_id', nodeIdTwo);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read nodes with empty array', function () {
+            it('should return an empty array', function (done) {
+                db.readNodesByIds([], function (err, result) {
+                    onlyResult(err, result);
+                    result.should.be.an.instanceOf(Array);
+                    result.should.have.lengthOf(0);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read nodes with non-array input', function () {
+            it('should return an error', function (done) {
+                db.readNodesByIds('not-an-array', function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read nodes with invalid id (negative)', function () {
+            it('should return an error', function (done) {
+                db.readNodesByIds([-1, nodeIdOne], function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read nodes with invalid id (string)', function () {
+            it('should return an error', function (done) {
+                db.readNodesByIds(['abc', nodeIdOne], function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read nodes with invalid id (null in array)', function () {
+            it('should return an error', function (done) {
+                db.readNodesByIds([null, nodeIdOne], function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read nodes with invalid id (float)', function () {
+            it('should return an error', function (done) {
+                db.readNodesByIds([1.5], function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read nodes preserves order regardless of batch completion order', function () {
+            it('should return results aligned with input id order', function (done) {
+                db.readNodesByIds([nodeIdThree, nodeIdOne, nodeIdTwo], function (err, result) {
+                    onlyResult(err, result);
+                    result.should.have.lengthOf(3);
+                    result[0].should.have.property('_id', nodeIdThree);
+                    result[1].should.have.property('_id', nodeIdOne);
+                    result[2].should.have.property('_id', nodeIdTwo);
+                    done();
+                });
+            });
+        });
+
+        after(function (done) {
+            step(
+                function deleteNodes() {
+                    db.deleteNode(nodeIdOne, this.parallel());
+                    db.deleteNode(nodeIdTwo, this.parallel());
+                    db.deleteNode(nodeIdThree, this.parallel());
+                },
+                function afterDelete(err, result) {
+                    done();
+                }
+            );
+        });
+    }); /* END => Test Batch Read Nodes by IDs */
+
+    describe('\n=> Test Batch Read Relationships by IDs', function () {
+        var root_node_id, other_node1_id, other_node2_id;
+        var relationship1_id, relationship2_id;
+
+        before(function (done) {
+            db.insertNode({ name: 'batchRelRoot' }, function (err, node1) {
+                onlyResult(err, node1);
+                root_node_id = node1._id;
+                db.insertNode({ name: 'batchRelOther1' }, function (err, node2) {
+                    onlyResult(err, node2);
+                    other_node1_id = node2._id;
+                    db.insertRelationship(root_node_id, other_node1_id, 'KNOWS', { since: 2020 }, function (err, rel1) {
+                        onlyResult(err, rel1);
+                        relationship1_id = rel1._id;
+                        db.insertNode({ name: 'batchRelOther2' }, function (err, node3) {
+                            onlyResult(err, node3);
+                            other_node2_id = node3._id;
+                            db.insertRelationship(root_node_id, other_node2_id, 'LIKES', { weight: 5 }, function (err, rel2) {
+                                onlyResult(err, rel2);
+                                relationship2_id = rel2._id;
+                                done();
+                            });
+                        });
+                    });
+                });
+            });
+        });
+
+        describe('-> Read multiple existing relationships by ids', function () {
+            it('should return all relationships in the correct order with _id, _start, _end, _type', function (done) {
+                db.readRelationshipsByIds([relationship1_id, relationship2_id], function (err, result) {
+                    onlyResult(err, result);
+                    result.should.be.an.instanceOf(Array);
+                    result.should.have.lengthOf(2);
+                    result[0].should.have.property('_id', relationship1_id);
+                    result[0].should.have.property('_start', root_node_id);
+                    result[0].should.have.property('_end', other_node1_id);
+                    result[0].should.have.property('_type', 'KNOWS');
+                    result[0].should.have.property('since', 2020);
+                    result[1].should.have.property('_id', relationship2_id);
+                    result[1].should.have.property('_start', root_node_id);
+                    result[1].should.have.property('_end', other_node2_id);
+                    result[1].should.have.property('_type', 'LIKES');
+                    result[1].should.have.property('weight', 5);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read relationships with partial miss', function () {
+            it('should return relationships for existing ids and null for missing ids', function (done) {
+                db.readRelationshipsByIds([relationship1_id, 123456789, relationship2_id], function (err, result) {
+                    onlyResult(err, result);
+                    result.should.be.an.instanceOf(Array);
+                    result.should.have.lengthOf(3);
+                    result[0].should.have.property('_id', relationship1_id);
+                    result[0].should.have.property('_type', 'KNOWS');
+                    should.equal(result[1], null);
+                    result[2].should.have.property('_id', relationship2_id);
+                    result[2].should.have.property('_type', 'LIKES');
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read relationships with all ids not existing', function () {
+            it('should return an array of nulls', function (done) {
+                db.readRelationshipsByIds([123456780, 123456781], function (err, result) {
+                    onlyResult(err, result);
+                    result.should.be.an.instanceOf(Array);
+                    result.should.have.lengthOf(2);
+                    should.equal(result[0], null);
+                    should.equal(result[1], null);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read relationships with duplicate ids', function () {
+            it('should return the same relationship for each duplicate id', function (done) {
+                db.readRelationshipsByIds([relationship1_id, relationship1_id], function (err, result) {
+                    onlyResult(err, result);
+                    result.should.be.an.instanceOf(Array);
+                    result.should.have.lengthOf(2);
+                    result[0].should.have.property('_id', relationship1_id);
+                    result[0].should.have.property('_type', 'KNOWS');
+                    result[1].should.have.property('_id', relationship1_id);
+                    result[1].should.have.property('_type', 'KNOWS');
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read relationships with empty array', function () {
+            it('should return an empty array', function (done) {
+                db.readRelationshipsByIds([], function (err, result) {
+                    onlyResult(err, result);
+                    result.should.be.an.instanceOf(Array);
+                    result.should.have.lengthOf(0);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read relationships with non-array input', function () {
+            it('should return an error', function (done) {
+                db.readRelationshipsByIds(42, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read relationships with invalid id (negative)', function () {
+            it('should return an error', function (done) {
+                db.readRelationshipsByIds([-5], function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read relationships with invalid id (string)', function () {
+            it('should return an error', function (done) {
+                db.readRelationshipsByIds(['foo'], function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read relationships with invalid id (null in array)', function () {
+            it('should return an error', function (done) {
+                db.readRelationshipsByIds([null], function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read relationships preserves order', function () {
+            it('should return results aligned with input id order', function (done) {
+                db.readRelationshipsByIds([relationship2_id, relationship1_id], function (err, result) {
+                    onlyResult(err, result);
+                    result.should.have.lengthOf(2);
+                    result[0].should.have.property('_id', relationship2_id);
+                    result[0].should.have.property('_type', 'LIKES');
+                    result[1].should.have.property('_id', relationship1_id);
+                    result[1].should.have.property('_type', 'KNOWS');
+                    done();
+                });
+            });
+        });
+
+        after(function (done) {
+            step(
+                function cleanup() {
+                    db.deleteRelationship(relationship1_id, this.parallel());
+                    db.deleteRelationship(relationship2_id, this.parallel());
+                },
+                function afterRelDelete(err, result) {
+                    step(
+                        function deleteNodes() {
+                            db.deleteNode(root_node_id, this.parallel());
+                            db.deleteNode(other_node1_id, this.parallel());
+                            db.deleteNode(other_node2_id, this.parallel());
+                        },
+                        function afterNodeDelete(err, result) {
+                            done();
+                        }
+                    );
+                }
+            );
+        });
+    }); /* END => Test Batch Read Relationships by IDs */
+
     /* HELPER FUNCTIONS ------------ */
 
     describe('\n=> Testing replaceNullWithString', function () {

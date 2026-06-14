@@ -85,6 +85,12 @@ Take a look at the test.main.js file in the test folder for many examples.
 
 **deleteNodesWithLabelsAndProperties** Delete all nodes with labels and properties.
 
+### Batch read operations
+
+**readNodesByIds** Read multiple nodes by an array of node IDs. Returns an array of the same length preserving order. Missing nodes are `null`.
+
+**readRelationshipsByIds** Read multiple relationships by an array of relationship IDs. Returns an array of the same length preserving order. Missing relationships are `null`.
+
 ### Constraints
 
 **createUniquenessContstraint** Create a uniqueness constraint on a property.
@@ -367,6 +373,55 @@ For more information about what queries are possible checkout the [Neo4j REST AP
 
         console.log(result); // delivers an array of query results
     });
+
+### Batch read operations
+
+**Read multiple nodes by IDs**
+
+Given an array of node IDs, returns an array of the same length preserving the original order. For each ID that exists, the corresponding element is the node object (with `_id`). For each ID that does not exist, the corresponding element is `null`.
+
+    db.readNodesByIds([1, 2, 3], function(err, result){
+        if(err) throw err;
+
+        console.log(result);
+        // [ { _id: 1, name: 'Alice' }, { _id: 2, name: 'Bob' }, { _id: 3, name: 'Charlie' } ]
+    });
+
+When some IDs do not exist, the corresponding positions in the result array are `null`:
+
+    db.readNodesByIds([1, 999999, 3], function(err, result){
+        if(err) throw err;
+
+        console.log(result);
+        // [ { _id: 1, name: 'Alice' }, null, { _id: 3, name: 'Charlie' } ]
+    });
+
+Passing an empty array returns an empty array. Passing a non-array or an array containing invalid IDs (negative numbers, strings, null, floats) returns an error.
+
+**Read multiple relationships by IDs**
+
+Given an array of relationship IDs, returns an array of the same length preserving the original order. Each found relationship includes `_id`, `_start`, `_end`, and `_type` properties (same as `readRelationship`). For each ID that does not exist, the corresponding element is `null`.
+
+    db.readRelationshipsByIds([10, 11], function(err, result){
+        if(err) throw err;
+
+        console.log(result);
+        // [
+        //   { _id: 10, _start: 1, _end: 2, _type: 'KNOWS', since: 2020 },
+        //   { _id: 11, _start: 1, _end: 3, _type: 'LIKES', weight: 5 }
+        // ]
+    });
+
+When some IDs do not exist:
+
+    db.readRelationshipsByIds([10, 999999], function(err, result){
+        if(err) throw err;
+
+        console.log(result);
+        // [ { _id: 10, _start: 1, _end: 2, _type: 'KNOWS' }, null ]
+    });
+
+Same validation rules apply: empty array returns `[]`, non-array or invalid IDs return an error.
 
 ## Tests
 
