@@ -3082,4 +3082,207 @@ describe('Testing Node specific operations for Neo4j', function () {
             });
         });
     });
+
+    describe('\n=> mergeNode: Merge (find-or-create) a Node', function () {
+        var createdNodeId;
+
+        // Clean up any leftover test nodes before running
+        before(function (done) {
+            db.deleteNodesWithLabelsAndProperties(['MergeTestUser'], {}, function (err, result) {
+                db.deleteNodesWithLabelsAndProperties(['MergeTestAdmin'], {}, function (err, result) {
+                    db.deleteNodesWithLabelsAndProperties(['MergeTestMultiA', 'MergeTestMultiB'], {}, function (err, result) {
+                        done();
+                    });
+                });
+            });
+        });
+
+        describe('-> First call should create a new node (single label)', function () {
+            it('should return created: true and the new node', function (done) {
+                db.mergeNode(
+                    'MergeTestUser',
+                    { email: 'merge_single@example.com' },
+                    { name: 'Alice', age: 30 },
+                    function (err, result) {
+                        onlyResult(err, result);
+                        result.should.have.property('created', true);
+                        result.should.have.property('node');
+                        result.node.should.have.property('_id');
+                        result.node._id.should.be.a.Number;
+                        result.node.should.have.property('email', 'merge_single@example.com');
+                        result.node.should.have.property('name', 'Alice');
+                        result.node.should.have.property('age', 30);
+                        result.node.should.not.have.property('_merge_marker');
+                        createdNodeId = result.node._id;
+                        done();
+                    }
+                );
+            });
+        });
+
+        describe('-> Second call with same identity should match existing node', function () {
+            it('should return created: false and the same node id', function (done) {
+                db.mergeNode(
+                    'MergeTestUser',
+                    { email: 'merge_single@example.com' },
+                    { name: 'Alice-should-not-overwrite', age: 99 },
+                    function (err, result) {
+                        onlyResult(err, result);
+                        result.should.have.property('created', false);
+                        result.should.have.property('node');
+                        result.node.should.have.property('_id', createdNodeId);
+                        // create-only properties should NOT be overwritten on match
+                        result.node.should.have.property('name', 'Alice');
+                        result.node.should.have.property('age', 30);
+                        result.node.should.not.have.property('_merge_marker');
+                        done();
+                    }
+                );
+            });
+        });
+
+        describe('-> Merge with updateProperties should update matched node', function () {
+            it('should return created: false and updated fields', function (done) {
+                db.mergeNode(
+                    'MergeTestUser',
+                    { email: 'merge_single@example.com' },
+                    { name: 'IgnoredOnMatch' },
+                    { score: 100, nickname: 'Ali' },
+                    function (err, result) {
+                        onlyResult(err, result);
+                        result.should.have.property('created', false);
+                        result.node.should.have.property('_id', createdNodeId);
+                        result.node.should.have.property('score', 100);
+                        result.node.should.have.property('nickname', 'Ali');
+                        // Original create-only properties untouched
+                        result.node.should.have.property('name', 'Alice');
+                        result.node.should.not.have.property('_merge_marker');
+                        done();
+                    }
+                );
+            });
+        });
+
+        describe('-> Merge with multiple labels', function () {
+            var multiNodeId;
+
+            it('should create a node with two labels and return created: true', function (done) {
+                db.mergeNode(
+                    ['MergeTestMultiA', 'MergeTestMultiB'],
+                    { uid: 'multi_001' },
+                    { role: 'superuser' },
+                    function (err, result) {
+                        onlyResult(err, result);
+                        result.should.have.property('created', true);
+                        result.node.should.have.property('_id');
+                        result.node.should.have.property('uid', 'multi_001');
+                        result.node.should.have.property('role', 'superuser');
+                        result.node.should.not.have.property('_merge_marker');
+                        multiNodeId = result.node._id;
+                        done();
+                    }
+                );
+            });
+
+            it('should match the same multi-label node on second call', function (done) {
+                db.mergeNode(
+                    ['MergeTestMultiA', 'MergeTestMultiB'],
+                    { uid: 'multi_001' },
+                    { role: 'should-not-overwrite' },
+                    { lastSeen: 'today' },
+                    function (err, result) {
+                        onlyResult(err, result);
+                        result.should.have.property('created', false);
+                        result.node.should.have.property('_id', multiNodeId);
+                        result.node.should.have.property('role', 'superuser');
+                        result.node.should.have.property('lastSeen', 'today');
+                        result.node.should.not.have.property('_merge_marker');
+                        done();
+                    }
+                );
+            });
+        });
+
+        describe('-> Merge with no createProperties and no updateProperties', function () {
+            it('should create the node with only identity properties', function (done) {
+                db.mergeNode(
+                    'MergeTestUser',
+                    { email: 'merge_bare@example.com' },
+                    function (err, result) {
+                        onlyResult(err, result);
+                        result.should.have.property('created', true);
+                        result.node.should.have.property('email', 'merge_bare@example.com');
+                        result.node.should.not.have.property('_merge_marker');
+                        done();
+                    }
+                );
+            });
+
+            it('should match the bare node on second call', function (done) {
+                db.mergeNode(
+                    'MergeTestUser',
+                    { email: 'merge_bare@example.com' },
+                    function (err, result) {
+                        onlyResult(err, result);
+                        result.should.have.property('created', false);
+                        result.node.should.have.property('email', 'merge_bare@example.com');
+                        result.node.should.not.have.property('_merge_marker');
+                        done();
+                    }
+                );
+            });
+        });
+
+        describe('-> Error: empty labels string', function () {
+            it('should return an error', function (done) {
+                db.mergeNode('', { email: 'x@y.com' }, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Error: empty labels array', function () {
+            it('should return an error', function (done) {
+                db.mergeNode([], { email: 'x@y.com' }, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Error: missing identity properties', function () {
+            it('should return an error for empty object', function (done) {
+                db.mergeNode('MergeTestUser', {}, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+
+            it('should return an error for null', function (done) {
+                db.mergeNode('MergeTestUser', null, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Error: identity properties is not an object', function () {
+            it('should return an error', function (done) {
+                db.mergeNode('MergeTestUser', 'not_an_object', function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        // Clean up test nodes
+        after(function (done) {
+            db.deleteNodesWithLabelsAndProperties(['MergeTestUser'], {}, function (err, result) {
+                db.deleteNodesWithLabelsAndProperties(['MergeTestMultiA', 'MergeTestMultiB'], {}, function (err, result) {
+                    done();
+                });
+            });
+        });
+    }); /* END => mergeNode */
 });

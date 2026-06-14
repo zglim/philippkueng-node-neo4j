@@ -85,6 +85,8 @@ Take a look at the test.main.js file in the test folder for many examples.
 
 **deleteNodesWithLabelsAndProperties** Delete all nodes with labels and properties.
 
+**mergeNode** Merge (find-or-create) a node: find by labels and identity properties, create if not found, optionally set create-only or update-on-match properties.
+
 ### Constraints
 
 **createUniquenessContstraint** Create a uniqueness constraint on a property.
@@ -201,6 +203,65 @@ Returns the number of deleted nodes e.g.: 1.
 
   db.deleteNodesWithLabelsAndProperties('User',{ firstname: 'Sam', male: true }, function(err, deletedNodesCount){});
   db.deleteNodesWithLabelsAndProperties(['User','Admin'], { 'name': 'Sam'}, function(err, deletedNodesCount){});
+
+
+**Merge (find-or-create) a Node**
+
+Finds a node by labels and identity properties. If no matching node exists, creates one. Returns an object `{ node, created }` where `node` contains the node data (including `_id`) and `created` is `true` when a new node was created or `false` when an existing node was matched.
+
+* `labels`               String|Array[String]    One or more labels for the node
+* `identityProperties`   Object                  Properties used to find/match the node (part of the MERGE condition)
+* `createProperties`     Object (optional)       Properties set only when creating a new node (ON CREATE SET)
+* `updateProperties`     Object (optional)       Properties set only when matching an existing node (ON MATCH SET)
+* `callback`             Function                `callback(err, { node, created })`
+
+**create-only vs update-on-match:**
+
+Properties in `createProperties` are written to the node only when it is first created. If a matching node already exists these properties are ignored, so they will not overwrite existing values. Properties in `updateProperties` are written only when a matching node is found; they are not applied when a new node is created.
+
+*Single label example:*
+
+    db.mergeNode('User', { email: 'alice@example.com' }, { name: 'Alice', age: 30 }, function(err, result){
+        if(err) throw err;
+
+        console.log(result.created); // true on first call, false on subsequent calls
+        console.log(result.node);    // { _id: 42, email: 'alice@example.com', name: 'Alice', age: 30 }
+    });
+
+    // Second call with same identity: matches existing node, createProperties are ignored
+    db.mergeNode('User', { email: 'alice@example.com' }, { name: 'Ignored', age: 99 }, function(err, result){
+        console.log(result.created); // false
+        console.log(result.node.name); // 'Alice' — not overwritten
+    });
+
+*Single label with update-on-match:*
+
+    db.mergeNode('User', { email: 'alice@example.com' }, { name: 'Alice' }, { lastLogin: '2024-01-15' }, function(err, result){
+        if(err) throw err;
+
+        // If the node already existed, lastLogin is updated; name is NOT overwritten.
+        // If the node was just created, name is set but lastLogin is NOT set.
+        console.log(result.created);
+        console.log(result.node);
+    });
+
+*Multiple labels example:*
+
+    db.mergeNode(['User', 'Admin'], { email: 'admin@example.com' }, { name: 'Admin User', role: 'superuser' }, function(err, result){
+        if(err) throw err;
+
+        console.log(result.created); // true if new, false if matched
+        console.log(result.node);    // { _id: ..., email: 'admin@example.com', name: 'Admin User', role: 'superuser' }
+    });
+
+*Bare merge (no extra properties):*
+
+    db.mergeNode('Session', { sessionId: 'abc123' }, function(err, result){
+        if(err) throw err;
+
+        console.log(result.created); // true or false
+        console.log(result.node);    // { _id: ..., sessionId: 'abc123' }
+    });
 
 
 ### Relationship operations
