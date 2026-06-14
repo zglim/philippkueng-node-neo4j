@@ -113,6 +113,12 @@ Take a look at the test.main.js file in the test folder for many examples.
 
 **beginAndCommitTransaction** Begin and commit a transaction in one request.
 
+### Path queries
+
+**readShortestPath** Find the shortest path between two nodes with optional type, direction and depth filters.
+
+**readAllPaths** Find all paths between two nodes up to a given depth.
+
 ### Changes
 
 **Node id** is now an **integer** not a string.
@@ -338,6 +344,64 @@ Get all (incoming and outgoing) relationships of a node, or use the options obje
 
             console.log(relationships); // delivers an array of relationship objects.
     });
+
+### Path queries
+
+Find the shortest path or all paths between two nodes, optionally filtered by relationship type, direction and maximum depth.
+
+**Find the shortest path between two nodes**
+
+    db.readShortestPath(startNodeId, endNodeId, function(err, result) {
+        if (err) throw err;
+
+        // result.data is an array of path objects.
+        // Each path has { start, end, nodes, relationships }.
+        console.log(result.data);
+    });
+
+When no path exists, `result.data` is an empty array (not an error).
+
+**Filter by relationship type (single string or array)**
+
+    db.readShortestPath(startNodeId, endNodeId, { types: 'KNOWS' }, callback);
+    db.readShortestPath(startNodeId, endNodeId, { types: ['KNOWS', 'WORKS_WITH'] }, callback);
+
+**Filter by direction**
+
+Direction can be `'all'` (default), `'out'` or `'in'`.
+
+    db.readShortestPath(startNodeId, endNodeId, { direction: 'out' }, callback);
+
+**Limit maximum traversal depth**
+
+    db.readShortestPath(startNodeId, endNodeId, { maxDepth: 5 }, callback);
+
+**Combine all options**
+
+    db.readShortestPath(startNodeId, endNodeId, {
+        types: ['KNOWS', 'WORKS_WITH'],
+        direction: 'out',
+        maxDepth: 5
+    }, function(err, result) {
+        if (err) throw err;
+        console.log(result.data);
+    });
+
+**Find all paths between two nodes**
+
+`readAllPaths` requires `maxDepth` to avoid unbounded traversal.
+
+    db.readAllPaths(startNodeId, endNodeId, { maxDepth: 3 }, callback);
+    db.readAllPaths(startNodeId, endNodeId, {
+        types: 'KNOWS',
+        direction: 'out',
+        maxDepth: 5
+    }, callback);
+
+**Invalid parameters**
+
+Invalid node ids, unknown direction values, empty type arrays, and non-positive-integer `maxDepth` will return an error to the callback instead of executing a query.
+
 
 **Run a cypher query against Neo4j**
 

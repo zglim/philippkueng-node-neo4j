@@ -3011,6 +3011,272 @@ describe('Testing Node specific operations for Neo4j', function () {
         });
     });
 
+    /* PATH QUERIES ---------- */
+
+    describe('\n=> Path Queries: readShortestPath and readAllPaths', function () {
+        var nodeA_id, nodeB_id, nodeC_id, nodeD_id;
+        var relAB_id, relBC_id, relCD_id, relAD_id;
+
+        // Build a small graph:
+        //   A --[KNOWS]--> B --[KNOWS]--> C --[WORKS_WITH]--> D
+        //   A --[WORKS_WITH]--> D   (direct shortcut)
+        before(function (done) {
+            db.cypherQuery(
+                'CREATE (a {name: "pathA"}), ' +
+                '(b {name: "pathB"}), ' +
+                '(c {name: "pathC"}), ' +
+                '(d {name: "pathD"}), ' +
+                '(a)-[r1:KNOWS]->(b), ' +
+                '(b)-[r2:KNOWS]->(c), ' +
+                '(c)-[r3:WORKS_WITH]->(d), ' +
+                '(a)-[r4:WORKS_WITH]->(d) ' +
+                'RETURN id(a), id(b), id(c), id(d), id(r1), id(r2), id(r3), id(r4)',
+                function (err, result) {
+                    onlyResult(err, result);
+                    nodeA_id = result.data[0][0];
+                    nodeB_id = result.data[0][1];
+                    nodeC_id = result.data[0][2];
+                    nodeD_id = result.data[0][3];
+                    relAB_id = result.data[0][4];
+                    relBC_id = result.data[0][5];
+                    relCD_id = result.data[0][6];
+                    relAD_id = result.data[0][7];
+                    done();
+                });
+        });
+
+        after(function (done) {
+            db.cypherQuery(
+                'MATCH (a {name: "pathA"}), (b {name: "pathB"}), (c {name: "pathC"}), (d {name: "pathD"}) ' +
+                'MATCH (a)-[r1]->(b), (b)-[r2]->(c), (c)-[r3]->(d), (a)-[r4]->(d) ' +
+                'DELETE a, b, c, d, r1, r2, r3, r4',
+                function (err, result) {
+                    done();
+                });
+        });
+
+        describe('-> readShortestPath: find shortest path between two connected nodes', function () {
+            it('should return a path from A to D', function (done) {
+                db.readShortestPath(nodeA_id, nodeD_id, function (err, result) {
+                    onlyResult(err, result);
+                    result.should.have.keys('columns', 'data');
+                    result.data.should.be.an.instanceOf(Array);
+                    result.data.should.have.lengthOf(1);
+                    result.data[0].should.have.property('start');
+                    result.data[0].should.have.property('end');
+                    result.data[0].should.have.property('nodes');
+                    result.data[0].should.have.property('relationships');
+                    // Shortest path A->D is direct via WORKS_WITH (length 1)
+                    result.data[0].nodes.should.have.lengthOf(2);
+                    result.data[0].relationships.should.have.lengthOf(1);
+                    done();
+                });
+            });
+        });
+
+        describe('-> readShortestPath: no path returns empty data', function () {
+            it('should return empty data when no path exists (D to A, out direction)', function (done) {
+                // D has no outgoing edges to A, so shortestPath with out direction should yield nothing
+                db.readShortestPath(nodeD_id, nodeA_id, { direction: 'out' }, function (err, result) {
+                    onlyResult(err, result);
+                    result.should.have.keys('columns', 'data');
+                    result.data.should.be.an.instanceOf(Array);
+                    result.data.should.have.lengthOf(0);
+                    done();
+                });
+            });
+        });
+
+        describe('-> readShortestPath: filter by single relationship type', function () {
+            it('should find path using only KNOWS relationships', function (done) {
+                // A->B->C via KNOWS, but C->D is WORKS_WITH, so no path A->D with KNOWS only
+                db.readShortestPath(nodeA_id, nodeC_id, { types: 'KNOWS' }, function (err, result) {
+                    onlyResult(err, result);
+                    result.data.should.be.an.instanceOf(Array);
+                    result.data.should.have.lengthOf(1);
+                    result.data[0].nodes.should.have.lengthOf(3); // A, B, C
+                    result.data[0].relationships.should.have.lengthOf(2); // A->B, B->C
+                    done();
+                });
+            });
+        });
+
+        describe('-> readShortestPath: filter by multiple relationship types', function () {
+            it('should find path using KNOWS or WORKS_WITH', function (done) {
+                db.readShortestPath(nodeA_id, nodeD_id, { types: ['KNOWS', 'WORKS_WITH'] }, function (err, result) {
+                    onlyResult(err, result);
+                    result.data.should.be.an.instanceOf(Array);
+                    result.data.should.have.lengthOf(1);
+                    // Shortest is still A->D direct via WORKS_WITH
+                    result.data[0].nodes.should.have.lengthOf(2);
+                    result.data[0].relationships.should.have.lengthOf(1);
+                    done();
+                });
+            });
+        });
+
+        describe('-> readShortestPath: direction filter "out"', function () {
+            it('should find path following outgoing relationships only', function (done) {
+                db.readShortestPath(nodeA_id, nodeD_id, { direction: 'out' }, function (err, result) {
+                    onlyResult(err, result);
+                    result.data.should.be.an.instanceOf(Array);
+                    result.data.should.have.lengthOf(1);
+                    result.data[0].nodes.should.have.lengthOf(2);
+                    done();
+                });
+            });
+        });
+
+        describe('-> readShortestPath: direction filter "in" yields no path', function () {
+            it('should return empty data when traversing incoming from A to D', function (done) {
+                // A has no incoming edges, so path from A to D via incoming is impossible
+                db.readShortestPath(nodeA_id, nodeD_id, { direction: 'in' }, function (err, result) {
+                    onlyResult(err, result);
+                    result.data.should.be.an.instanceOf(Array);
+                    result.data.should.have.lengthOf(0);
+                    done();
+                });
+            });
+        });
+
+        describe('-> readShortestPath: maxDepth limit prevents finding path', function () {
+            it('should return empty data when maxDepth is too small', function (done) {
+                // A->B->C needs depth 2 for A->C, limiting to 1 means no path
+                db.readShortestPath(nodeA_id, nodeC_id, { types: 'KNOWS', maxDepth: 1 }, function (err, result) {
+                    onlyResult(err, result);
+                    result.data.should.be.an.instanceOf(Array);
+                    result.data.should.have.lengthOf(0);
+                    done();
+                });
+            });
+        });
+
+        describe('-> readShortestPath: maxDepth allows finding path', function () {
+            it('should find path when maxDepth is sufficient', function (done) {
+                db.readShortestPath(nodeA_id, nodeC_id, { types: 'KNOWS', maxDepth: 3 }, function (err, result) {
+                    onlyResult(err, result);
+                    result.data.should.be.an.instanceOf(Array);
+                    result.data.should.have.lengthOf(1);
+                    result.data[0].nodes.should.have.lengthOf(3);
+                    done();
+                });
+            });
+        });
+
+        describe('-> readShortestPath: invalid startNodeId', function () {
+            it('should return an error', function (done) {
+                db.readShortestPath(-1, nodeD_id, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> readShortestPath: invalid endNodeId', function () {
+            it('should return an error', function (done) {
+                db.readShortestPath(nodeA_id, 'abc', function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> readShortestPath: invalid direction', function () {
+            it('should return an error', function (done) {
+                db.readShortestPath(nodeA_id, nodeD_id, { direction: 'sideways' }, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> readShortestPath: empty types array', function () {
+            it('should return an error', function (done) {
+                db.readShortestPath(nodeA_id, nodeD_id, { types: [] }, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> readShortestPath: invalid maxDepth', function () {
+            it('should return an error for maxDepth = 0', function (done) {
+                db.readShortestPath(nodeA_id, nodeD_id, { maxDepth: 0 }, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+
+            it('should return an error for negative maxDepth', function (done) {
+                db.readShortestPath(nodeA_id, nodeD_id, { maxDepth: -3 }, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+
+            it('should return an error for non-integer maxDepth', function (done) {
+                db.readShortestPath(nodeA_id, nodeD_id, { maxDepth: 2.5 }, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> readAllPaths: find all paths between two nodes', function () {
+            it('should return at least one path from A to D with maxDepth 3', function (done) {
+                db.readAllPaths(nodeA_id, nodeD_id, { maxDepth: 3 }, function (err, result) {
+                    onlyResult(err, result);
+                    result.should.have.keys('columns', 'data');
+                    result.data.should.be.an.instanceOf(Array);
+                    // There are two paths: A->D (direct) and A->B->C->D
+                    result.data.length.should.be.aboveOrEqual(1);
+                    done();
+                });
+            });
+        });
+
+        describe('-> readAllPaths: filter by type', function () {
+            it('should return only paths using WORKS_WITH', function (done) {
+                db.readAllPaths(nodeA_id, nodeD_id, { types: 'WORKS_WITH', direction: 'out', maxDepth: 3 }, function (err, result) {
+                    onlyResult(err, result);
+                    result.data.should.be.an.instanceOf(Array);
+                    result.data.should.have.lengthOf(1);
+                    result.data[0].relationships.should.have.lengthOf(1); // direct A->D
+                    done();
+                });
+            });
+        });
+
+        describe('-> readAllPaths: no path returns empty data', function () {
+            it('should return empty data when no path exists', function (done) {
+                db.readAllPaths(nodeD_id, nodeA_id, { direction: 'out', maxDepth: 3 }, function (err, result) {
+                    onlyResult(err, result);
+                    result.data.should.be.an.instanceOf(Array);
+                    result.data.should.have.lengthOf(0);
+                    done();
+                });
+            });
+        });
+
+        describe('-> readAllPaths: missing maxDepth returns error', function () {
+            it('should return an error', function (done) {
+                db.readAllPaths(nodeA_id, nodeD_id, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> readAllPaths: invalid parameters return error', function () {
+            it('should return an error for invalid startNodeId', function (done) {
+                db.readAllPaths(null, nodeD_id, { maxDepth: 3 }, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+    }); /* END => Path Queries */
+
     /* HELPER FUNCTIONS ------------ */
 
     describe('\n=> Testing replaceNullWithString', function () {
