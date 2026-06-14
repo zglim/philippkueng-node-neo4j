@@ -42,6 +42,60 @@ db.cypherQuery("START user = node(123) MATCH user-[:RELATED_TO]->friends RETURN 
 });
 ```
 
+**Run a graph cypher query**
+
+A regular `cypherQuery` returns *row* data: an array of the values your `RETURN`
+clause produced (with `_id` added to every node). When you want the underlying
+graph structure (the nodes and the relationships/edges connecting them) — for
+example to feed a visualisation — request a *graph* result.
+
+Use the `graphQuery` shorthand, or pass `{ graph: true }` as options to
+`cypherQuery`:
+
+```javascript
+// shorthand
+db.graphQuery("MATCH (bike:Bike)-[r:HAS]->(wheel:Wheel) RETURN bike, r, wheel", function(err, result){
+    if(err) throw err;
+    console.log(result.nodes);
+    console.log(result.relationships);
+});
+
+// equivalent, via cypherQuery with options (params may be null)
+db.cypherQuery("MATCH (bike:Bike)-[r:HAS]->(wheel:Wheel) RETURN bike, r, wheel", null, { graph: true }, function(err, result){
+    if(err) throw err;
+});
+```
+
+The graph result is normalised to:
+
+```javascript
+{
+    columns: [ 'bike', 'r', 'wheel' ], // the returned columns
+    data: [ [ /* bike */, /* r */, /* wheel */ ] ], // the raw `row` values, one array per result row
+    nodes: [
+        { _id: 1, labels: [ 'Bike' ], weight: 10 },
+        { _id: 2, labels: [ 'Wheel' ], spokes: 3 }
+    ],
+    relationships: [
+        { _id: 0, _start: 1, _end: 2, _type: 'HAS', position: 1 }
+    ]
+}
+```
+
+`nodes` and `relationships` collate every node and edge from **all** columns and
+rows (paths are flattened, duplicates are removed by id), so they can be handed
+straight to a graph visualisation or to further processing:
+
+* `nodes` — each node carries `_id`, its `labels` array and all of its
+  properties. Use `_id` as the vertex identifier.
+* `relationships` — each edge carries `_id`, `_start` (source node id), `_end`
+  (target node id), `_type` (the relationship type) and all of its properties.
+  Use `_start` / `_end` to draw the edges between the matching nodes.
+
+`columns` and `data` keep the original row-shaped result around in case you also
+need the exact values your query returned (multi-column results are preserved as
+arrays).
+
 **NOTE**
 New features like labels, contraints and transactions are only supported by Neo4j 2.0.0.
 
@@ -117,6 +171,8 @@ Take a look at the test.main.js file in the test folder for many examples.
 
 **Node id** is now an **integer** not a string.
 **cypherQuery** Now supports parameters, Neo4j will cache query and reuse it with different parameters.
+**cypherQuery** Now accepts an options object as its third argument (e.g. `{ graph: true }` or `{ include_stats: true }`) while keeping the old `cypherQuery(query, params, include_stats, callback)` signature working.
+**graphQuery** Run a cypher query and get back a graph structured result (`{ columns, data, nodes, relationships }`) without opening a transaction yourself. See the *Run a graph cypher query* example above.
 
 ### Node operations
 

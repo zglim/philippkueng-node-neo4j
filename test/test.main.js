@@ -2924,6 +2924,238 @@ describe('Testing Node specific operations for Neo4j', function () {
         });
     }); /* END => Tests for github issues related to cypher queries */
 
+    describe('\n=> Test Graph Cypher Query Functionality', function () {
+        var parser = require('../lib/utils/parser');
+
+        /* -------- Pure unit tests (no running Neo4j required) -------- */
+
+        describe('-> parser.parseGraphNode', function () {
+            it('should add an integer _id, the labels and the properties', function () {
+                var node = parser.parseGraphNode({
+                    id: '382',
+                    labels: ['Person'],
+                    properties: { name: 'Adam', age: 22 }
+                });
+                node._id.should.equal(382);
+                node.labels.should.eql(['Person']);
+                node.name.should.equal('Adam');
+                node.age.should.equal(22);
+            });
+        });
+
+        describe('-> parser.parseGraphRelationship', function () {
+            it('should add _id / _start / _end / _type and the properties', function () {
+                var relationship = parser.parseGraphRelationship({
+                    id: '7',
+                    type: 'HAS',
+                    startNode: '1',
+                    endNode: '2',
+                    properties: { position: 1 }
+                });
+                relationship._id.should.equal(7);
+                relationship._start.should.equal(1);
+                relationship._end.should.equal(2);
+                relationship._type.should.equal('HAS');
+                relationship.position.should.equal(1);
+            });
+        });
+
+        describe('-> parser.parseGraphResult', function () {
+            it('should keep multi-column rows and flatten + de-duplicate nodes and relationships', function () {
+                var body = {
+                    results: [{
+                        columns: ['bike', 'p1', 'p2'],
+                        data: [{
+                            row: [{ weight: 10 }, ['a'], ['b']],
+                            graph: {
+                                nodes: [
+                                    { id: '1', labels: ['Bike'], properties: { weight: 10 } },
+                                    { id: '2', labels: ['Wheel'], properties: { spokes: 3 } },
+                                    { id: '3', labels: ['Wheel'], properties: { spokes: 32 } }
+                                ],
+                                relationships: [
+                                    { id: '0', type: 'HAS', startNode: '1', endNode: '2', properties: { position: 1 } },
+                                    { id: '1', type: 'HAS', startNode: '1', endNode: '3', properties: { position: 2 } }
+                                ]
+                            }
+                        }, {
+                            row: [{ weight: 10 }, ['a'], ['b']],
+                            graph: {
+                                nodes: [{ id: '1', labels: ['Bike'], properties: { weight: 10 } }],
+                                relationships: [{ id: '0', type: 'HAS', startNode: '1', endNode: '2', properties: { position: 1 } }]
+                            }
+                        }]
+                    }],
+                    errors: []
+                };
+                var result = parser.parseGraphResult(body);
+                result.should.have.keys('columns', 'data', 'nodes', 'relationships');
+                result.columns.should.eql(['bike', 'p1', 'p2']);
+                result.data.should.have.lengthOf(2);
+                result.data[0].should.be.an.instanceOf(Array);
+                result.data[0].should.have.lengthOf(3); // multi-column row preserved
+                result.nodes.should.have.lengthOf(3); // de-duplicated across rows
+                result.relationships.should.have.lengthOf(2); // de-duplicated across rows
+                result.nodes[0]._id.should.equal(1);
+                result.relationships[0]._type.should.equal('HAS');
+            });
+
+            it('should return empty arrays for an empty result set', function () {
+                var result = parser.parseGraphResult({ results: [], errors: [] });
+                result.columns.should.eql([]);
+                result.data.should.eql([]);
+                result.nodes.should.eql([]);
+                result.relationships.should.eql([]);
+            });
+        });
+
+        /* -------- Invalid parameter handling (no running Neo4j required) -------- */
+
+        describe('-> Invalid parameters', function () {
+            it('cypherQuery should return an error when the query is not a string', function (done) {
+                db.cypherQuery(12345, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+
+            it('cypherQuery should return an error when the query is an empty string, even in graph mode', function (done) {
+                db.cypherQuery('', null, { graph: true }, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+
+            it('graphQuery should return an error when the query is empty', function (done) {
+                db.graphQuery('', function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        /* -------- Integration tests (require a running Neo4j) -------- */
+
+        describe('-> Graph and row queries against a real graph', function () {
+            var bikeId, wheel1Id, wheel2Id;
+
+            before(function (done) {
+                db.cypherQuery("CREATE (bike:GraphTestBike {weight: 10}),\
+            (w1:GraphTestWheel {spokes: 3}),\
+            (w2:GraphTestWheel {spokes: 32}),\
+            (bike)-[:HAS {position: 1}]->(w1),\
+            (bike)-[:HAS {position: 2}]->(w2)\
+            RETURN id(bike), id(w1), id(w2)", function (err, result) {
+                    onlyResult(err, result);
+                    bikeId = result.data[0][0];
+                    wheel1Id = result.data[0][1];
+                    wheel2Id = result.data[0][2];
+                    done();
+                });
+            });
+
+            describe('-> cypherQuery in row mode (backwards compatible)', function () {
+                it('should still return columns + data with _id added to nodes', function (done) {
+                    db.cypherQuery("MATCH (bike:GraphTestBike) RETURN bike", function (err, result) {
+                        onlyResult(err, result);
+                        result.should.have.keys('columns', 'data');
+                        result.columns.should.containEql('bike');
+                        result.data.should.be.an.instanceOf(Array);
+                        result.data.should.have.lengthOf(1);
+                        result.data[0]._id.should.equal(bikeId);
+                        result.data[0].weight.should.equal(10);
+                        done();
+                    });
+                });
+            });
+
+            describe('-> cypherQuery in row mode returning relationships', function () {
+                it('should normalise relationships with _id / _start / _end / _type', function (done) {
+                    db.cypherQuery("MATCH (bike:GraphTestBike)-[r:HAS]->(w) RETURN r", function (err, result) {
+                        onlyResult(err, result);
+                        result.data.should.be.an.instanceOf(Array);
+                        result.data.should.have.lengthOf(2);
+                        result.data.forEach(function (relationship) {
+                            should.exist(relationship._id);
+                            should.exist(relationship._end);
+                            relationship._start.should.equal(bikeId);
+                            relationship._type.should.equal('HAS');
+                        });
+                        done();
+                    });
+                });
+            });
+
+            describe('-> graphQuery', function () {
+                it('should return columns, data, nodes and relationships', function (done) {
+                    db.graphQuery("MATCH (bike:GraphTestBike)-[r:HAS]->(w:GraphTestWheel) RETURN bike, r, w", function (err, result) {
+                        onlyResult(err, result);
+                        result.should.have.keys('columns', 'data', 'nodes', 'relationships');
+                        result.columns.should.containEql('bike');
+                        result.columns.should.containEql('r');
+                        result.columns.should.containEql('w');
+
+                        result.nodes.should.be.an.instanceOf(Array);
+                        result.nodes.should.have.lengthOf(3); // bike + 2 wheels, de-duplicated
+                        result.nodes.forEach(function (node) {
+                            should.exist(node._id);
+                            node.labels.should.be.an.instanceOf(Array);
+                        });
+
+                        result.relationships.should.be.an.instanceOf(Array);
+                        result.relationships.should.have.lengthOf(2);
+                        var nodeIds = result.nodes.map(function (node) { return node._id; });
+                        result.relationships.forEach(function (relationship) {
+                            should.exist(relationship._id);
+                            relationship._type.should.equal('HAS');
+                            relationship._start.should.equal(bikeId);
+                            nodeIds.should.containEql(relationship._start);
+                            nodeIds.should.containEql(relationship._end);
+                        });
+                        done();
+                    });
+                });
+            });
+
+            describe('-> cypherQuery with { graph: true } and params', function () {
+                it('should return the same graph structure and preserve multi-column rows', function (done) {
+                    db.cypherQuery("MATCH (bike:GraphTestBike)-[r:HAS]->(w) WHERE id(bike) = {id} RETURN bike, r, w", { id: bikeId }, { graph: true }, function (err, result) {
+                        onlyResult(err, result);
+                        result.should.have.keys('columns', 'data', 'nodes', 'relationships');
+                        result.columns.should.have.lengthOf(3);
+                        result.data.should.have.lengthOf(2); // one row per wheel
+                        result.data[0].should.be.an.instanceOf(Array);
+                        result.data[0].should.have.lengthOf(3); // multi-column row preserved
+                        result.nodes.should.have.lengthOf(3);
+                        result.relationships.should.have.lengthOf(2);
+                        done();
+                    });
+                });
+            });
+
+            describe('-> graphQuery returning a path', function () {
+                it('should flatten and de-duplicate the nodes and relationships of the path', function (done) {
+                    db.graphQuery("MATCH p = (bike:GraphTestBike)-[:HAS]->(w:GraphTestWheel) RETURN p", function (err, result) {
+                        onlyResult(err, result);
+                        result.should.have.keys('columns', 'data', 'nodes', 'relationships');
+                        result.columns.should.containEql('p');
+                        result.data.should.have.lengthOf(2); // two paths -> two rows
+                        result.nodes.should.have.lengthOf(3); // bike + 2 wheels, flattened + de-duplicated
+                        result.relationships.should.have.lengthOf(2);
+                        done();
+                    });
+                });
+            });
+
+            after(function (done) {
+                db.cypherQuery("MATCH (bike:GraphTestBike) OPTIONAL MATCH (bike)-[r]->(w) DELETE bike, r, w", function (err, result) {
+                    onlyResult(err, result);
+                    done();
+                });
+            });
+        });
+    }); /* END => Test Graph Cypher Query Functionality */
+
     describe('\n=> Test Batch Query Functionality', function () {
         var root_node_id, other_node1_id, other_node2_id, relationship1_id, relationship2_id;
 
