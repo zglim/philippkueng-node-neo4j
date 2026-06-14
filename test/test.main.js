@@ -1189,6 +1189,235 @@ describe('Testing Node specific operations for Neo4j', function () {
         });
     }); /* END \n=> Add a Node to an Index */
 
+    describe('\n=> Query and Remove a Node Index', function () {
+        var nodeId;
+        var indexName = 'query_node_test_index';
+        var key = 'name';
+        var value = 'queryfoobar';
+
+        before(function (done) {
+            db.insertNodeIndex(indexName, function (err, result) {
+                onlyResult(err, result);
+                db.insertNode({ name: value }, function (err, result) {
+                    onlyResult(err, result);
+                    nodeId = result._id;
+                    db.addNodeToIndex(nodeId, indexName, key, value, function (err, result) {
+                        onlyResult(err, result);
+                        done();
+                    });
+                });
+            });
+        });
+
+        describe('-> Query a Node Index with a matching value', function () {
+            it('should return an array containing the node', function (done) {
+                db.queryNodeIndex(indexName, key, value, function (err, result) {
+                    onlyResult(err, result);
+                    result.should.be.an.instanceOf(Array);
+                    result.should.have.lengthOf(1);
+                    result[0].name.should.equal(value);
+                    result[0]._id.should.equal(nodeId);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read one Node from an Index with a matching value', function () {
+            it('should return the node', function (done) {
+                db.readNodeFromIndex(indexName, key, value, function (err, result) {
+                    onlyResult(err, result);
+                    result.name.should.equal(value);
+                    result._id.should.equal(nodeId);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Add the same Node to the Index again and query', function () {
+            it('should still return the node', function (done) {
+                db.addNodeToIndex(nodeId, indexName, key, value, function (err, result) {
+                    onlyResult(err, result);
+                    db.queryNodeIndex(indexName, key, value, function (err, result) {
+                        onlyResult(err, result);
+                        result.should.be.an.instanceOf(Array);
+                        result.length.should.be.above(0);
+                        result[0]._id.should.equal(nodeId);
+                        done();
+                    });
+                });
+            });
+        });
+
+        describe('-> Query a Node Index with a non-matching value', function () {
+            it('should return an empty array', function (done) {
+                db.queryNodeIndex(indexName, key, 'doesnotexist', function (err, result) {
+                    onlyResult(err, result);
+                    result.should.be.an.instanceOf(Array);
+                    result.should.have.lengthOf(0);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read one Node from an Index with a non-matching value', function () {
+            it('should return false', function (done) {
+                db.readNodeFromIndex(indexName, key, 'doesnotexist', function (err, result) {
+                    isFalse(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Remove a Node from an Index by key and value', function () {
+            it('should return true', function (done) {
+                db.removeNodeFromIndex(nodeId, indexName, key, value, function (err, result) {
+                    isTrue(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Query the Node Index again after removal', function () {
+            it('should return an empty array', function (done) {
+                db.queryNodeIndex(indexName, key, value, function (err, result) {
+                    onlyResult(err, result);
+                    result.should.be.an.instanceOf(Array);
+                    result.should.have.lengthOf(0);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Remove a Node from an Index with an invalid node id', function () {
+            it('should return an error', function (done) {
+                db.removeNodeFromIndex('not-an-id', indexName, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        after(function (done) {
+            db.deleteNodeIndex(indexName, function (err, result) {
+                isTrue(err, result);
+                db.deleteNode(nodeId, function (err, result) {
+                    isTrue(err, result);
+                    done();
+                });
+            });
+        });
+    }); /* END \n=> Query and Remove a Node Index */
+
+    describe('\n=> Query and Remove a Relationship Index', function () {
+        var rootNodeId, otherNodeId, relationshipId;
+        var indexName = 'query_relationship_test_index';
+        var key = 'reltype';
+        var value = 'queryrel';
+
+        before(function (done) {
+            db.insertRelationshipIndex(indexName, function (err, result) {
+                onlyResult(err, result);
+                db.insertNode({ name: 'relroot' }, function (err, result) {
+                    onlyResult(err, result);
+                    rootNodeId = result._id;
+                    db.insertNode({ name: 'relother' }, function (err, result) {
+                        onlyResult(err, result);
+                        otherNodeId = result._id;
+                        db.insertRelationship(rootNodeId, otherNodeId, 'RELATED_TO', { foo: 'bar' }, function (err, result) {
+                            onlyResult(err, result);
+                            relationshipId = result._id;
+                            db.addRelationshipToIndex(relationshipId, indexName, key, value, function (err, result) {
+                                onlyResult(err, result);
+                                done();
+                            });
+                        });
+                    });
+                });
+            });
+        });
+
+        describe('-> Query a Relationship Index with a matching value', function () {
+            it('should return an array containing the relationship', function (done) {
+                db.queryRelationshipIndex(indexName, key, value, function (err, result) {
+                    onlyResult(err, result);
+                    result.should.be.an.instanceOf(Array);
+                    result.should.have.lengthOf(1);
+                    result[0].foo.should.equal('bar');
+                    result[0]._id.should.equal(relationshipId);
+                    result[0]._type.should.equal('RELATED_TO');
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read one Relationship from an Index with a matching value', function () {
+            it('should return the relationship', function (done) {
+                db.readRelationshipFromIndex(indexName, key, value, function (err, result) {
+                    onlyResult(err, result);
+                    result.foo.should.equal('bar');
+                    result._id.should.equal(relationshipId);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Query a Relationship Index with a non-matching value', function () {
+            it('should return an empty array', function (done) {
+                db.queryRelationshipIndex(indexName, key, 'doesnotexist', function (err, result) {
+                    onlyResult(err, result);
+                    result.should.be.an.instanceOf(Array);
+                    result.should.have.lengthOf(0);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Read one Relationship from an Index with a non-matching value', function () {
+            it('should return false', function (done) {
+                db.readRelationshipFromIndex(indexName, key, 'doesnotexist', function (err, result) {
+                    isFalse(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Remove a Relationship from an Index by id', function () {
+            it('should return true', function (done) {
+                db.removeRelationshipFromIndex(relationshipId, indexName, function (err, result) {
+                    isTrue(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Query the Relationship Index again after removal', function () {
+            it('should return an empty array', function (done) {
+                db.queryRelationshipIndex(indexName, key, value, function (err, result) {
+                    onlyResult(err, result);
+                    result.should.be.an.instanceOf(Array);
+                    result.should.have.lengthOf(0);
+                    done();
+                });
+            });
+        });
+
+        after(function (done) {
+            db.deleteRelationship(relationshipId, function (err, result) {
+                isTrue(err, result);
+                db.deleteRelationshipIndex(indexName, function (err, result) {
+                    isTrue(err, result);
+                    db.deleteNode(otherNodeId, function (err, result) {
+                        isTrue(err, result);
+                        db.deleteNode(rootNodeId, function (err, result) {
+                            isTrue(err, result);
+                            done();
+                        });
+                    });
+                });
+            });
+        });
+    }); /* END \n=> Query and Remove a Relationship Index */
+
     describe('\n=> Add one or multiple Labels to a Node', function () {
         var nodeId;
         before(function (done) {

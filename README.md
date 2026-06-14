@@ -314,6 +314,53 @@ This documentation only contains calls to Node specific index functions however 
         console.log(result); // will return the index
     });
 
+**Query an index by key and value**
+
+Returns an array of the matching nodes. An existing index with no matching entry returns an empty array, a non-existing index returns `false`.
+
+    db.queryNodeIndex('the_index_name', 'an_indexed_key', 'an_indexed_value', function(err, results){
+        if (err) throw err;
+
+        console.log(results); // an array of nodes, e.g. [ { name: 'foobar', _id: 12 } ]
+    });
+
+**Read a single node from an index by key and value**
+
+Returns the first matching node, or `false` when nothing matched (a miss is not treated as an error).
+
+    db.readNodeFromIndex('the_index_name', 'an_indexed_key', 'an_indexed_value', function(err, node){
+        if (err) throw err;
+
+        if (node === false) {
+            // nothing was indexed under that key/value
+        } else {
+            console.log(node); // e.g. { name: 'foobar', _id: 12 }
+        }
+    });
+
+**Remove a node from an index**
+
+Supports the three common forms. Returns `true` when the removal succeeded, `false` when the item or index doesn't exist.
+
+    // remove one specific key/value entry of the node
+    db.removeNodeFromIndex(node_id, 'the_index_name', 'an_indexed_key', 'an_indexed_value', function(err, result){
+        if (err) throw err;
+
+        console.log(result); // true when removed
+    });
+
+    // remove every entry of the node for a given key
+    db.removeNodeFromIndex(node_id, 'the_index_name', 'an_indexed_key', function(err, result){
+        if (err) throw err;
+    });
+
+    // remove every entry of the node from the index
+    db.removeNodeFromIndex(node_id, 'the_index_name', function(err, result){
+        if (err) throw err;
+    });
+
+A full workflow therefore looks like: `insertNodeIndex` → `addNodeToIndex` → `queryNodeIndex` / `readNodeFromIndex` → `removeNodeFromIndex`. As noted above, replace `Node` with `Relationship` to operate on relationship indexes (`queryRelationshipIndex`, `readRelationshipFromIndex`, `removeRelationshipFromIndex`).
+
 ### Advanced relationship operations
 
 **Get all relationship types used within the Neo4j database**
