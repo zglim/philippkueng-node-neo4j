@@ -3011,6 +3011,206 @@ describe('Testing Node specific operations for Neo4j', function () {
         });
     });
 
+    describe('\n=> Path queries between two nodes', function () {
+        var idA, idB, idC, idD;
+
+        // Build a small graph:
+        //   (A)-[:KNOWS]->(B)-[:KNOWS]->(C)
+        //   (A)-[:LIKES]->(C)               (shorter alternative between A and C)
+        //   (D)                             (isolated, used for the "no path" case)
+        before(function (done) {
+            db.cypherQuery(
+                'CREATE (a {name: "pathA"}), (b {name: "pathB"}), (c {name: "pathC"}), (d {name: "pathD"}), ' +
+                '(a)-[:KNOWS]->(b), (b)-[:KNOWS]->(c), (a)-[:LIKES]->(c) ' +
+                'RETURN id(a), id(b), id(c), id(d)', function (err, result) {
+                    onlyResult(err, result);
+                    idA = result.data[0][0];
+                    idB = result.data[0][1];
+                    idC = result.data[0][2];
+                    idD = result.data[0][3];
+                    done();
+                });
+        });
+
+        describe('-> Shortest path between two connected nodes (no constraints)', function () {
+            it('should return a single path object using the shortest (LIKES) route', function (done) {
+                db.readShortestPath(idA, idC, function (err, result) {
+                    onlyResult(err, result);
+                    result.should.have.keys('columns', 'data');
+                    result.columns.should.containEql('path');
+                    result.data.should.be.an.instanceOf(Array);
+                    result.data.should.have.lengthOf(1);
+                    result.data[0].nodes.should.have.lengthOf(2);
+                    result.data[0].relationships.should.have.lengthOf(1);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Shortest path with a relationship type filter', function () {
+            it('should ignore the LIKES shortcut and return the longer KNOWS path', function (done) {
+                db.readShortestPath(idA, idC, {
+                    types: ['KNOWS']
+                }, function (err, result) {
+                    onlyResult(err, result);
+                    result.data.should.have.lengthOf(1);
+                    result.data[0].nodes.should.have.lengthOf(3);
+                    result.data[0].relationships.should.have.lengthOf(2);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Shortest path with a single relationship type as a string', function () {
+            it('should accept a string for "types" and return the LIKES path', function (done) {
+                db.readShortestPath(idA, idC, {
+                    types: 'LIKES'
+                }, function (err, result) {
+                    onlyResult(err, result);
+                    result.data.should.have.lengthOf(1);
+                    result.data[0].relationships.should.have.lengthOf(1);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Shortest path with a direction filter', function () {
+            it('should find an undirected path from C back to A', function (done) {
+                db.readShortestPath(idC, idA, {
+                    direction: 'all'
+                }, function (err, result) {
+                    onlyResult(err, result);
+                    result.data.should.have.lengthOf(1);
+                    done();
+                });
+            });
+
+            it('should return an empty result when constrained to outgoing relationships from C', function (done) {
+                db.readShortestPath(idC, idA, {
+                    direction: 'out'
+                }, function (err, result) {
+                    onlyResult(err, result);
+                    result.should.have.keys('columns', 'data');
+                    result.data.should.be.an.instanceOf(Array);
+                    result.data.should.have.lengthOf(0);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Shortest path with a maximum depth', function () {
+            it('should return an empty result when the only typed path is deeper than maxDepth', function (done) {
+                db.readShortestPath(idA, idC, {
+                    types: ['KNOWS'],
+                    maxDepth: 1
+                }, function (err, result) {
+                    onlyResult(err, result);
+                    result.data.should.have.lengthOf(0);
+                    done();
+                });
+            });
+
+            it('should return the path when maxDepth is large enough', function (done) {
+                db.readShortestPath(idA, idC, {
+                    types: ['KNOWS'],
+                    maxDepth: 2
+                }, function (err, result) {
+                    onlyResult(err, result);
+                    result.data.should.have.lengthOf(1);
+                    result.data[0].relationships.should.have.lengthOf(2);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Shortest path when no path exists', function () {
+            it('should return an empty result, not an error', function (done) {
+                db.readShortestPath(idA, idD, function (err, result) {
+                    onlyResult(err, result);
+                    result.should.have.keys('columns', 'data');
+                    result.data.should.be.an.instanceOf(Array);
+                    result.data.should.have.lengthOf(0);
+                    done();
+                });
+            });
+        });
+
+        describe('-> All paths between two nodes', function () {
+            it('should return every outgoing path from A to C within maxDepth', function (done) {
+                db.readPaths(idA, idC, {
+                    direction: 'out',
+                    maxDepth: 2
+                }, function (err, result) {
+                    onlyResult(err, result);
+                    result.columns.should.containEql('path');
+                    result.data.should.be.an.instanceOf(Array);
+                    result.data.should.have.lengthOf(2);
+                    result.data[0].should.have.property('nodes');
+                    result.data[1].should.have.property('nodes');
+                    done();
+                });
+            });
+        });
+
+        describe('-> Invalid arguments', function () {
+            it('should error on an illegal "from" node id', function (done) {
+                db.readShortestPath(-1, idC, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+
+            it('should error on an illegal "to" node id', function (done) {
+                db.readShortestPath(idA, 'not-a-number', function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+
+            it('should error on an illegal direction', function (done) {
+                db.readShortestPath(idA, idC, {
+                    direction: 'sideways'
+                }, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+
+            it('should error on an empty types array', function (done) {
+                db.readShortestPath(idA, idC, {
+                    types: []
+                }, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+
+            it('should error on an invalid maxDepth', function (done) {
+                db.readShortestPath(idA, idC, {
+                    maxDepth: 0
+                }, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+
+            it('should apply the same validation to readPaths', function (done) {
+                db.readPaths(-1, idC, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        after(function (done) {
+            db.cypherQuery('MATCH (n) WHERE id(n) IN {ids} OPTIONAL MATCH (n)-[r]-() DELETE r, n', {
+                ids: [idA, idB, idC, idD]
+            }, function (err, result) {
+                done();
+            });
+        });
+    }); /* END => Path queries between two nodes */
+
     /* HELPER FUNCTIONS ------------ */
 
     describe('\n=> Testing replaceNullWithString', function () {

@@ -339,6 +339,64 @@ Get all (incoming and outgoing) relationships of a node, or use the options obje
             console.log(relationships); // delivers an array of relationship objects.
     });
 
+**Find the shortest path between two nodes**
+
+Find the shortest path between two nodes (referenced by their node id) without writing
+Cypher by hand. Use the optional options object to constrain the relationship type(s),
+the direction and the maximum depth of the path.
+
+    db.readShortestPath(fromNodeId, toNodeId, {
+        types: ['KNOWS', 'LIKES'], // optional, a single string or an array of strings
+        direction: 'out',          // optional, 'all' (default), 'in' or 'out'
+        maxDepth: 4                // optional, limit the path to at most 4 hops
+        }, function(err, result) {
+            if (err) throw err;
+
+            // Same shape as a `RETURN path` cypher query.
+            console.log(result.columns); // ['path']
+            console.log(result.data);    // [ { start, end, length, nodes: [...], relationships: [...] } ]
+    });
+
+When you don't need any constraints, just pass the two node ids and a callback. The
+relationship type, direction and depth are then left unrestricted:
+
+    db.readShortestPath(fromNodeId, toNodeId, function(err, result) {
+        if (err) throw err;
+
+        console.log(result.data);
+    });
+
+When there is no path between the two nodes (or one of the ids does not exist) the
+library's regular empty result is returned instead of an error, i.e. `result.data` is
+an empty array:
+
+    db.readShortestPath(fromNodeId, unreachableNodeId, function(err, result) {
+        if (err) throw err;
+
+        console.log(result.data.length); // 0 -> "no path" is not treated as an error
+    });
+
+Malformed arguments are reported as an error: an illegal node id (not a positive
+integer), an illegal direction (anything other than `all`, `in` or `out`), an empty
+types array / empty type string or an invalid `maxDepth` (not a positive integer) all
+deliver an `Error` to the callback.
+
+**Find all paths between two nodes**
+
+`readPaths` accepts the exact same options as `readShortestPath` but returns every
+matching path (one path object per result) instead of only the shortest one. Setting
+`maxDepth` is strongly recommended to keep the traversal bounded.
+
+    db.readPaths(fromNodeId, toNodeId, {
+        types: 'KNOWS',   // optional
+        direction: 'out', // optional, defaults to 'all'
+        maxDepth: 3       // optional, but recommended
+        }, function(err, result) {
+            if (err) throw err;
+
+            console.log(result.data); // an array of path objects, empty when there is no path
+    });
+
 **Run a cypher query against Neo4j**
 
     db.cypherQuery("START user = node(123) MATCH user-[:RELATED_TO]->friends RETURN friends", function(err, result){
