@@ -1633,6 +1633,204 @@ describe('Testing Node specific operations for Neo4j', function () {
         });
     }); /* END \n=> readNodesWithLabelsAndProperties:  Get nodes by label and property -------*/
 
+    describe('\n=> mergeNode: Find or create a node', function () {
+        var mergedNodeId;
+        var multiLabelNodeId;
+
+        describe('-> First call with a single label and identity properties', function () {
+            it('should create the node and report created = true', function (done) {
+                db.mergeNode('MergeUser', {
+                    userid: 'merge-124'
+                }, {
+                    onCreate: {
+                        name: 'Sam',
+                        createdAt: 1419
+                    }
+                }, function (err, result) {
+                    onlyResult(err, result);
+                    result.created.should.equal(true);
+                    should.exist(result.node);
+                    should.exist(result.node._id);
+                    result.node.userid.should.equal('merge-124');
+                    result.node.name.should.equal('Sam');
+                    result.node.createdAt.should.equal(1419);
+                    mergedNodeId = result.node._id;
+                    done();
+                });
+            });
+        });
+
+        describe('-> Second call with the same identity', function () {
+            it('should reuse the existing node and report created = false', function (done) {
+                db.mergeNode('MergeUser', {
+                    userid: 'merge-124'
+                }, {
+                    onCreate: {
+                        name: 'ShouldNotOverwrite',
+                        createdAt: 9999
+                    }
+                }, function (err, result) {
+                    onlyResult(err, result);
+                    result.created.should.equal(false);
+                    should.exist(result.node);
+                    result.node._id.should.equal(mergedNodeId);
+                    // onCreate must NOT run when an existing node is matched.
+                    result.node.name.should.equal('Sam');
+                    result.node.createdAt.should.equal(1419);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Matching call with onMatch properties', function () {
+            it('should update the matched node with the onMatch properties', function (done) {
+                db.mergeNode('MergeUser', {
+                    userid: 'merge-124'
+                }, {
+                    onMatch: {
+                        lastSeen: 2020
+                    }
+                }, function (err, result) {
+                    onlyResult(err, result);
+                    result.created.should.equal(false);
+                    result.node._id.should.equal(mergedNodeId);
+                    result.node.lastSeen.should.equal(2020);
+                    // Untouched identity / create-only properties remain.
+                    result.node.name.should.equal('Sam');
+                    done();
+                });
+            });
+        });
+
+        describe('-> Call without an options object (identity only)', function () {
+            it('should still work and reuse the node (findOrCreateNode alias)', function (done) {
+                db.findOrCreateNode('MergeUser', {
+                    userid: 'merge-124'
+                }, function (err, result) {
+                    onlyResult(err, result);
+                    result.created.should.equal(false);
+                    result.node._id.should.equal(mergedNodeId);
+                    done();
+                });
+            });
+        });
+
+        describe('-> First call with multiple labels', function () {
+            it('should create the node with all labels and report created = true', function (done) {
+                db.mergeNode(['MergeUser', 'MergeAdmin'], {
+                    email: 'sam@example.com'
+                }, {
+                    onCreate: {
+                        role: 'root'
+                    }
+                }, function (err, result) {
+                    onlyResult(err, result);
+                    result.created.should.equal(true);
+                    should.exist(result.node._id);
+                    result.node.email.should.equal('sam@example.com');
+                    result.node.role.should.equal('root');
+                    multiLabelNodeId = result.node._id;
+
+                    // Confirm both labels were actually applied to the node.
+                    db.readNodesWithLabelsAndProperties(['MergeUser', 'MergeAdmin'], {
+                        email: 'sam@example.com'
+                    }, function (err, nodes) {
+                        onlyResult(err, nodes);
+                        nodes.should.be.an.instanceOf(Array);
+                        nodes.should.have.lengthOf(1);
+                        nodes[0]._id.should.equal(multiLabelNodeId);
+                        done();
+                    });
+                });
+            });
+        });
+
+        describe('-> Second call with the same multiple labels and identity', function () {
+            it('should reuse the existing multi-label node', function (done) {
+                db.mergeNode(['MergeUser', 'MergeAdmin'], {
+                    email: 'sam@example.com'
+                }, function (err, result) {
+                    onlyResult(err, result);
+                    result.created.should.equal(false);
+                    result.node._id.should.equal(multiLabelNodeId);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Invalid: empty string label', function () {
+            it('should return an error', function (done) {
+                db.mergeNode('', {
+                    userid: 'x'
+                }, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Invalid: empty array of labels', function () {
+            it('should return an error', function (done) {
+                db.mergeNode([], {
+                    userid: 'x'
+                }, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Invalid: array containing an empty label', function () {
+            it('should return an error', function (done) {
+                db.mergeNode(['MergeUser', ''], {
+                    userid: 'x'
+                }, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Invalid: empty identity properties', function () {
+            it('should return an error', function (done) {
+                db.mergeNode('MergeUser', {}, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Invalid: identity properties not an object', function () {
+            it('should return an error', function (done) {
+                db.mergeNode('MergeUser', 'not-an-object', function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        describe('-> Invalid: onCreate is not a plain object', function () {
+            it('should return an error', function (done) {
+                db.mergeNode('MergeUser', {
+                    userid: 'x'
+                }, {
+                    onCreate: ['not', 'an', 'object']
+                }, function (err, result) {
+                    onlyError(err, result);
+                    done();
+                });
+            });
+        });
+
+        after(function (done) {
+            db.deleteNode(mergedNodeId, function () {
+                db.deleteNode(multiLabelNodeId, function () {
+                    done();
+                });
+            });
+        });
+    }); /* END \n=> mergeNode: Find or create a node -------*/
+
     describe('\n=> listAllLabels:  List all labels', function () {
         var nodeIdOne;
         var nodeIdTwo;

@@ -79,6 +79,8 @@ Take a look at the test.main.js file in the test folder for many examples.
 
 **readNodesWithLabelsAndProperties** Get nodes by labels and properties.
 
+**mergeNode** (alias **findOrCreateNode**) Find a node by labels and identity properties, create it when missing, with separate create-only and update-on-match properties.
+
 **listAllLabels** List all labels.
 
 **updateNodesWithLabelsAndProperties** Update all nodes with labels and properties and update/remove properties.
@@ -181,6 +183,49 @@ Will change only the name and remove the old_address of user with userid '123'. 
             // zero or multiple nodes were updated
         }
     });
+
+**Merge a Node (find-or-create / upsert)**
+
+Find a node by one or more `labels` and a set of `identityProperties`. If no matching node exists it is created, otherwise the existing one is reused. Internally this runs a Cypher `MERGE`, so you don't have to assemble the query yourself.
+
+* `labels`              String|Array[String]    e.g.: `'User'` or `['User', 'Admin']` (at least one non-empty label)
+* `identityProperties`  Object                  the properties that form the MERGE identity, e.g.: `{ userid: '124' }` (non-empty object)
+* `options`             Object                  (Optional)
+    * `options.onCreate`   Object   properties written **only when the node is created** (`ON CREATE SET`)
+    * `options.onMatch`    Object   properties written **when an existing node is matched** (`ON MATCH SET`), also applied on create
+
+Only the `identityProperties` end up in the MERGE condition. The `onCreate` / `onMatch` bags are applied afterwards, so they never widen the lookup. The callback gets `(err, result)` where `result` is `{ node: <node data, including _id>, created: <Boolean> }`. Use `result.created` to branch on whether the node was newly inserted (`true`) or reused (`false`).
+
+Single label, identity only:
+
+    db.mergeNode('User', { userid: '124' }, function (err, result) {
+        if (err) throw err;
+
+        console.log(result.node._id);     // the node id
+        console.log(result.node.userid);  // '124'
+
+        if (result.created) {
+            // a brand new node was inserted
+        } else {
+            // an existing node was reused
+        }
+    });
+
+Multiple labels, with create-only and update-on-match properties:
+
+    db.mergeNode(['User', 'Admin'], { email: 'sam@example.com' }, {
+        onCreate: { createdAt: Date.now(), signupSource: 'import' }, // written once, on creation
+        onMatch: { lastSeenAt: Date.now() }                         // refreshed every time a match happens
+    }, function (err, result) {
+        if (err) throw err;
+
+        // On the first call result.created === true and createdAt is set.
+        // On later calls result.created === false, createdAt stays untouched
+        // and lastSeenAt gets updated.
+        console.log(result.node);
+    });
+
+`findOrCreateNode` is an alias for `mergeNode` with the exact same signature.
 
 **Delete a Node**
 
