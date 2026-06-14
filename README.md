@@ -348,6 +348,74 @@ Get all (incoming and outgoing) relationships of a node, or use the options obje
         console.log(result.columns); // delivers an array of names of objects getting returned
     });
 
+**Run a cypher query with graph results**
+
+By default, `cypherQuery` returns results in row format (`{ columns, data }`). Pass an options object as the third argument with `graph: true` to also receive a normalized graph structure alongside the row data. This is useful when you want to visualize the graph or process paths and relationships without parsing the raw Neo4j response yourself.
+
+The library transparently uses the transaction endpoint under the hood so you don't need to manage a transaction manually.
+
+    // Row-only query (existing behavior, unchanged)
+    db.cypherQuery("MATCH (a:User)-[r:KNOWS]->(b:User) RETURN a, r, b", function(err, result){
+        if(err) throw err;
+
+        console.log(result.columns); // ['a', 'r', 'b']
+        console.log(result.data);    // array of row tuples
+    });
+
+    // Graph query: same row data plus a flattened graph structure
+    db.cypherQuery("MATCH (a:User)-[r:KNOWS]->(b:User) RETURN a, r, b", null, { graph: true }, function(err, result){
+        if(err) throw err;
+
+        // Row data is still available and has the same shape as before
+        console.log(result.columns); // ['a', 'r', 'b']
+        console.log(result.data);    // array of row tuples
+
+        // Graph data: all nodes and relationships from the result, deduplicated
+        console.log(result.graph.nodes);
+        // [
+        //   { name: 'Alice', _id: 1, _labels: ['User'] },
+        //   { name: 'Bob',   _id: 2, _labels: ['User'] }
+        // ]
+
+        console.log(result.graph.relationships);
+        // [
+        //   { since: 2015, _id: 10, _start: 1, _end: 2, _type: 'KNOWS' }
+        // ]
+    });
+
+    // Graph query with parameters
+    db.cypherQuery(
+        "MATCH p = (a:User {name: {name}})-[:KNOWS*1..3]->(b) RETURN p",
+        { name: 'Alice' },
+        { graph: true },
+        function(err, result) {
+            if(err) throw err;
+
+            // Paths are flattened into the graph structure:
+            // result.graph.nodes contains every node touched by any path
+            // result.graph.relationships contains every relationship touched by any path
+            result.graph.nodes.forEach(function(n) {
+                console.log('node', n._id, n._labels, n.name);
+            });
+            result.graph.relationships.forEach(function(r) {
+                console.log('edge', r._id, r._type, r._start, '->', r._end);
+            });
+        }
+    );
+
+The fields inside `result.graph` are ready for direct use in visualizations or graph algorithms:
+
+* `nodes[].\_id` — numeric node id (same as `_id` returned by `readNode`)
+* `nodes[].\_labels` — array of labels assigned to the node
+* `nodes[]` — all other keys are the node's own properties
+* `relationships[].\_id` — numeric relationship id
+* `relationships[].\_start` — numeric id of the start node
+* `relationships[].\_end` — numeric id of the end node
+* `relationships[].\_type` — relationship type string
+* `relationships[]` — all other keys are the relationship's own properties
+
+Duplicate nodes or relationships (same id appearing in multiple result rows) are merged, so each entity appears at most once in `graph.nodes` / `graph.relationships`.
+
 **Run a batch query against Neo4j**
 
 For more information about what queries are possible checkout the [Neo4j REST API documentation](http://docs.neo4j.org/chunked/stable/rest-api-batch-ops.html).

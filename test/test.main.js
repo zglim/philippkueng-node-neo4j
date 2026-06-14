@@ -3082,4 +3082,148 @@ describe('Testing Node specific operations for Neo4j', function () {
             });
         });
     });
+
+    describe('\n=> cypherQuery graph mode (integration, requires Neo4j)', function () {
+        var nodeIdA, nodeIdB, relId;
+
+        before(function (done) {
+            db.insertNode({ name: 'GraphAlice' }, ['GraphUser'], function (err, n1) {
+                onlyResult(err, n1);
+                nodeIdA = n1._id;
+                db.insertNode({ name: 'GraphBob' }, ['GraphUser'], function (err, n2) {
+                    onlyResult(err, n2);
+                    nodeIdB = n2._id;
+                    db.insertRelationship(nodeIdA, nodeIdB, 'GRAPH_KNOWS', { since: 2020 }, function (err, r) {
+                        onlyResult(err, r);
+                        relId = r._id;
+                        done();
+                    });
+                });
+            });
+        });
+
+        describe('-> graph mode returns nodes and relationships', function () {
+            it('should return columns, data and a graph with normalized entities', function (done) {
+                db.cypherQuery(
+                    'MATCH (a:GraphUser)-[r:GRAPH_KNOWS]->(b:GraphUser) RETURN a, r, b',
+                    null,
+                    { graph: true },
+                    function (err, result) {
+                        onlyResult(err, result);
+                        result.should.have.property('columns');
+                        result.columns.should.have.lengthOf(3);
+                        result.should.have.property('data');
+                        result.data.should.have.lengthOf(1);
+                        result.should.have.property('graph');
+                        result.graph.should.have.property('nodes');
+                        result.graph.nodes.should.have.lengthOf(2);
+                        result.graph.should.have.property('relationships');
+                        result.graph.relationships.should.have.lengthOf(1);
+                        // Node normalization
+                        var nodeA = result.graph.nodes.filter(function (n) { return n._id === nodeIdA; })[0];
+                        should.exist(nodeA);
+                        nodeA.should.have.property('name', 'GraphAlice');
+                        nodeA.should.have.property('_labels');
+                        nodeA._labels.should.containEql('GraphUser');
+                        // Relationship normalization
+                        var rel = result.graph.relationships[0];
+                        rel.should.have.property('_id', relId);
+                        rel.should.have.property('_start', nodeIdA);
+                        rel.should.have.property('_end', nodeIdB);
+                        rel.should.have.property('_type', 'GRAPH_KNOWS');
+                        rel.should.have.property('since', 2020);
+                        done();
+                    }
+                );
+            });
+        });
+
+        describe('-> row mode backward compatibility (single column)', function () {
+            it('should return a flat data array for single column queries', function (done) {
+                db.cypherQuery(
+                    'MATCH (n:GraphUser) RETURN n',
+                    null,
+                    function (err, result) {
+                        onlyResult(err, result);
+                        result.should.have.keys('columns', 'data');
+                        result.data.should.be.an.instanceOf(Array);
+                        // Single column -> flat array of node objects
+                        result.data[0].should.have.property('name');
+                        result.data[0].should.have.property('_id');
+                        done();
+                    }
+                );
+            });
+        });
+
+        describe('-> row mode backward compatibility (multiple columns)', function () {
+            it('should return a nested data array for multi column queries', function (done) {
+                db.cypherQuery(
+                    'MATCH (a:GraphUser) RETURN a.name, a._id',
+                    null,
+                    function (err, result) {
+                        // Note: a._id is not a real property in cypher, this tests
+                        // multi-column return. Use a property that exists.
+                        db.cypherQuery(
+                            'MATCH (a:GraphUser)-[r:GRAPH_KNOWS]->(b:GraphUser) RETURN a.name, b.name',
+                            null,
+                            function (err, result) {
+                                onlyResult(err, result);
+                                result.should.have.keys('columns', 'data');
+                                result.columns.should.have.lengthOf(2);
+                                result.data.should.be.an.instanceOf(Array);
+                                result.data[0].should.be.an.instanceOf(Array);
+                                result.data[0].should.have.lengthOf(2);
+                                done();
+                            }
+                        );
+                    }
+                );
+            });
+        });
+
+        describe('-> graph mode with a path query', function () {
+            it('should expose all nodes and relationships from the path', function (done) {
+                db.cypherQuery(
+                    'MATCH p = (a:GraphUser)-[:GRAPH_KNOWS]->(b:GraphUser) RETURN p',
+                    null,
+                    { graph: true },
+                    function (err, result) {
+                        onlyResult(err, result);
+                        result.should.have.property('graph');
+                        result.graph.nodes.should.have.lengthOf(2);
+                        result.graph.relationships.should.have.lengthOf(1);
+                        done();
+                    }
+                );
+            });
+        });
+
+        describe('-> graph mode with invalid cypher syntax', function () {
+            it('should return an error for a malformed query', function (done) {
+                db.cypherQuery(
+                    'THIZ IZ NOT CYPHER',
+                    null,
+                    { graph: true },
+                    function (err, result) {
+                        onlyError(err, result);
+                        done();
+                    }
+                );
+            });
+        });
+
+        after(function (done) {
+            db.deleteRelationship(relId, function (err, result) {
+                isTrue(err, result);
+                db.deleteNode(nodeIdB, function (err, result) {
+                    isTrue(err, result);
+                    db.deleteNode(nodeIdA, function (err, result) {
+                        isTrue(err, result);
+                        done();
+                    });
+                });
+            });
+        });
+    });
 });
