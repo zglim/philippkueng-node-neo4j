@@ -147,6 +147,26 @@ Take a look at the test.main.js file in the test folder for many examples.
         console.log(node._id);
     });
 
+**Read multiple Nodes by id**
+
+Pass an array of node ids to fetch them all in one call instead of looping over `readNode` or hand-crafting a `batchQuery`. The result is an array that keeps the same order as the ids you passed in (it never gets reordered by which request finishes first). A node that is found is returned as its data object (with `_id`); an id that doesn't exist resolves to `false`, so you can tell hits from misses without the whole call failing.
+
+    db.readNodesByIds([12, 13, 99999], function(err, nodes){
+        if(err) throw err;
+
+        // `nodes` is aligned to the input order, e.g.:
+        // [ { _id: 12, ... }, { _id: 13, ... }, false ]
+        nodes.forEach(function(node){
+            if(node === false){
+                // this id was not found
+            } else {
+                console.log(node._id);
+            }
+        });
+    });
+
+Passing an empty array calls back with `[]`, and passing something that isn't an array calls back with an error.
+
 **Update a Node**
 
 Will remove any assigned properties and replace them with the ones given below.
@@ -234,6 +254,24 @@ Returns the number of deleted nodes e.g.: 1.
         if(err) throw err;
 
         // Same properties for relationship object as with InsertRelationship
+    });
+
+**Read multiple Relationships by id**
+
+Works like `readNodesByIds` but for relationships, so every found relationship keeps the usual `_id`, `_start`, `_end` and `_type` properties. The result keeps the input order and missing ids resolve to `false`.
+
+    db.readRelationshipsByIds([10, 11, 99999], function(err, relationships){
+        if(err) throw err;
+
+        // aligned to the input order, e.g.:
+        // [ { _id: 10, _start: .., _end: .., _type: .. }, { _id: 11, ... }, false ]
+        relationships.forEach(function(relationship){
+            if(relationship === false){
+                // this id was not found
+            } else {
+                console.log(relationship._id, relationship._start, relationship._end);
+            }
+        });
     });
 
 **Update a Relationship**
@@ -367,6 +405,8 @@ For more information about what queries are possible checkout the [Neo4j REST AP
 
         console.log(result); // delivers an array of query results
     });
+
+For the common case of just reading several nodes or relationships by their ids, prefer the higher level `readNodesByIds` / `readRelationshipsByIds` helpers documented above. They keep the input order and report missing ids as `false` instead of failing the whole batch.
 
 ## Tests
 
